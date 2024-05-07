@@ -4,15 +4,14 @@ const WebSocket = require('ws');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({server});
 
 // Game state
-let players = [];
+let players = {};
 let board = Array(3).fill(null).map(() => Array(3).fill(null));
-let currentPlayer = 'X';
 
 // Function to check for win conditions
-function checkWin() {
+function checkWin(board) {
     // Check rows
     for (let i = 0; i < 3; i++) {
         if (board[i][0] && board[i][0] === board[i][1] && board[i][0] === board[i][2]) {
@@ -40,31 +39,40 @@ function checkWin() {
 }
 
 // WebSocket handling
+let currentTurn = 'X';
+
 wss.on('connection', (ws) => {
     console.log('Player connected');
 
-    // Add player to the game
-    players.push(ws);
+    // Assign player
+    const player = Object.keys(players).length === 0 ? 'X' : 'O';
+    players[player] = ws;
+
+    console.log({board, player, currentTurn, winner: checkWin(board)});
 
     // Send initial game state
-    ws.send(JSON.stringify({ type: 'init', board, currentPlayer }));
+    ws.send(JSON.stringify({type: "init", board, player, currentTurn, winner: checkWin(board)}));
 
     // Handle player moves
     ws.on('message', (message) => {
-        const { row, col } = JSON.parse(message);
-        if (board[row][col] === null && players.indexOf(ws) === 0) {
-            board[row][col] = currentPlayer;
-            currentPlayer = currentPlayer === 'X' ? 'O' : 'X';
-            const winner = checkWin();
-            const messageToSend = JSON.stringify({ type: 'update', board, currentPlayer, winner });
-            players.forEach(player => player.send(messageToSend));
+        const {row, col, player} = JSON.parse(message);
+        if (!board[row][col] && player === currentTurn) {
+            console.log(`Player ${player} set on (${row}, ${col})`);
+            board[row][col] = currentTurn;
+            const winner = checkWin(board);
+            currentTurn = currentTurn === 'X' ? 'O' : 'X';
+            const messageToSend = JSON.stringify({type: "update", board, player, currentTurn, winner});
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(messageToSend);
+                }
+            });
         }
     });
 
     // Handle disconnection
     ws.on('close', () => {
         console.log('Player disconnected');
-        players = players.filter(player => player !== ws);
     });
 });
 
